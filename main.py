@@ -5,10 +5,11 @@ import time
 import os
 import gspread
 from urllib.parse import urlparse
-from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
 from dotenv import load_dotenv
 from typing import Iterator
 from bs4 import BeautifulSoup
+from tqdm import tqdm
 
 RETRY_DELAY = 2.5
 
@@ -22,19 +23,9 @@ X_ALGOLIA_API_KEY = os.getenv("x-algolia-api-key")
 
 # Google Sheets setup
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_file("credentials.json", scope)
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
 gs_client = gspread.authorize(creds)
 sheet = gs_client.open(GOOGLE_SHEET_NAME).sheet1
-
-# Add header row if empty
-if not sheet.get_all_values():
-    sheet.append_row([
-        "Startup Name", "Website", "Job URL", "Hiring Engineers?",
-        "Hiring Remote?", "Stage", "Linkedin URL", "CEO Name", "CEO Linkedin", "CEO Email", "Short Desc"
-    ])
-
-# Load existing company names and emails to avoid duplicates
-existing_companies = set((row[0], row[-2]) for row in sheet.get_all_values()[1:] if row[0])
 
 # Removes the https:// portion of the website to get the domain
 def extract_domain(url: str) -> str:
@@ -156,8 +147,8 @@ def get_ceo_email_from_hunter(domain: str) -> str:
     return ""
 
 # Fetches a company's name, website, stage, and description through a generator
-def fetch_yc_companies() -> Iterator[tuple[str]]:
-    index = 0
+def fetch_yc_companies(existing_companies) -> Iterator[tuple[str]]:
+    index = 1
 
     # YC uses algolia api to fetch companies, we can use it too
     url = "https://45bwzj1sgc-dsn.algolia.net/1/indexes/*/queries"
@@ -195,12 +186,12 @@ def fetch_yc_companies() -> Iterator[tuple[str]]:
             ceo_name, ceo_linkedin, company_linkedin = extract_founder_company_info(link) if link else None
             eng, remote, job_website = search_jobs(link+"/jobs", website) if link else None
             email = get_ceo_email_from_hunter(extract_domain(website)) if website else ""
-            sheet.append_row([name, website, job_website, eng, remote, stage, company_linkedin, ceo_name, ceo_linkedin, desc])
-            existing_companies.add((name, email))
+            sheet.append_row([name, website, job_website, eng, remote, stage, company_linkedin, ceo_name, ceo_linkedin, email, desc])
+            existing_companies.add(name)
             yield
 
         # If we have but email is missing, try using hunter again (if key works)
-        elif existing_companies[name][1] == "":
+        elif not sheet.cell(index, 10).value:
             email = get_ceo_email_from_hunter(extract_domain(website)) if website else ""
             sheet.update_cell(index, 10, email)
             yield
@@ -209,6 +200,22 @@ def fetch_yc_companies() -> Iterator[tuple[str]]:
         else:
             yield
 
-for _ in fetch_yc_companies():
-    print("Appended a startup")
-    time.sleep(0.5)
+# Main Flow
+def main():
+
+    # Add header row if empty
+    if len(sheet.get_all_values()) < 2:
+        sheet.append_row([
+            "Startup Name", "Website", "Job URL", "Hiring Engineers?",
+            "Hiring Remote?", "Stage", "Linkedin URL", "CEO Name", "CEO Linkedin", "CEO Email", "Short Desc"
+        ])
+
+    # Load existing company names and emails to avoid duplicates
+    existing_companies = set(row[0] for row in sheet.get_all_values()[1:] if row[0])
+
+    # Go through the generator and append each company individually
+    for _ in tqdm(fetch_yc_companies(existing_companies), desc="Searching for startups", leave=False):
+        continue
+
+if __name__ == "__main__":
+    main()
