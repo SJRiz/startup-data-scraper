@@ -4,6 +4,7 @@ import json
 import time
 import os
 import gspread
+from urllib.parse import urlparse
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 from typing import Iterator
@@ -32,6 +33,10 @@ if not sheet.get_all_values():
         "Hiring Remote?", "Stage", "Linkedin URL", "CEO Name", "CEO Linkedin"
     ])
 
+# Removes the https:// portion of the website to get the domain
+def extract_domain(url: str) -> str:
+    parsed = urlparse(url)
+    return parsed.netloc.replace("www.", "")
 
 # Gets the HTML structure of a website. Default 2 attempts
 def get_html(link: str, attempts: int = 2) -> str:
@@ -57,7 +62,7 @@ def get_html(link: str, attempts: int = 2) -> str:
             return ""
 
 # Appends the CEO's name, linkedin, and company linkedin to the sheet
-def extract_founder_company_info(yc_company_link: str) -> tuple[str, str, str]:
+def extract_founder_company_info(yc_company_link: str) -> tuple[str]:
     html_structure = get_html(yc_company_link)
     soup = BeautifulSoup(html_structure, "html.parser")
 
@@ -74,7 +79,7 @@ def extract_founder_company_info(yc_company_link: str) -> tuple[str, str, str]:
     return ceo_name, ceo_linkedin, company_linkedin
 
 # Checks if there are any remote or engineering jobs
-def search_jobs(yc_job_link: str, company_link: str):
+def search_jobs(yc_job_link: str, company_link: str) -> tuple[str]:
     html_structure = get_html(yc_job_link)
     soup = BeautifulSoup(html_structure, "html.parser")
 
@@ -119,8 +124,36 @@ def find_job_website(company_link: str) -> str:
         return company_link+"/jobs"
     return ""
 
+# Uses hunter api key to find the ceo's email
+def get_ceo_email_from_hunter(domain: str) -> str:
+    if not domain:
+        return ""
+
+    try:
+        url = "https://api.hunter.io/v2/domain-search"
+        params = {"domain": domain, "api_key": HUNTER_API_KEY}
+        resp = requests.get(url, params=params, timeout=3)
+        resp.raise_for_status()
+        emails = resp.json().get("data", {}).get("emails", [])
+
+        # Only look for CEO/founder-level roles
+        senior_titles = ["ceo", "founder", "president", "chief", "executive"]
+        for email_obj in sorted(emails, key=lambda x: x.get("confidence", 0), reverse=True):
+            position = email_obj.get("position_raw", "") or email_obj.get("position", "")
+            if any(role in position.lower() for role in senior_titles):
+                return email_obj.get("value", "")
+
+        # Fallback: just return most confident email
+        if emails:
+            return emails[0].get("value", "")
+
+    except Exception:
+        return ""
+
+    return ""
+
 # Fetches a company's name, website, stage, and description through a generator
-def fetch_yc_companies() -> Iterator[tuple[str, str, str, str]]:
+def fetch_yc_companies() -> Iterator[tuple[str]]:
     
     # YC uses algolia api to fetch companies, we can use it too
     url = "https://45bwzj1sgc-dsn.algolia.net/1/indexes/*/queries"
