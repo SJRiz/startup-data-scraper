@@ -19,7 +19,7 @@ def get_ceo_email_from_hunter(domain: str, first_name: str, last_name: str) -> s
         resp.raise_for_status()
         data = resp.json().get("data", {})
 
-        return data.get("email", "")
+        return data.get("email", "Not Found")
     
     except Exception as e:
         print(f"Email finder error: {e}")

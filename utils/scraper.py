@@ -30,7 +30,7 @@ def get_html(link: str, attempts: int = 2) -> str:
             return ""
 
 # Appends the CEO's name, linkedin, and company linkedin to the sheet
-def extract_founder_company_info(yc_company_link: str) -> tuple[str]:
+def extract_founder_company_info(yc_company_link: str) -> tuple[str, str, str]:
     html_structure = get_html(yc_company_link)
     soup = BeautifulSoup(html_structure, "html.parser")
 
@@ -46,8 +46,8 @@ def extract_founder_company_info(yc_company_link: str) -> tuple[str]:
 
     return ceo_name, ceo_linkedin, company_linkedin
 
-# Checks if there are any remote or engineering jobs
-def search_jobs(yc_job_link: str, company_link: str) -> tuple[str]:
+# Checks if there are any remote or engineering jobs, as well as a dedicated career page
+def search_jobs(yc_job_link: str, company_link: str) -> tuple[bool, bool, str]:
     html_structure = get_html(yc_job_link)
     soup = BeautifulSoup(html_structure, "html.parser")
 
@@ -55,7 +55,7 @@ def search_jobs(yc_job_link: str, company_link: str) -> tuple[str]:
     component_div = soup.find("div", id=lambda x: x and x.startswith("WaasShowJobsPage-react-component"))
 
     if not component_div:
-        return None
+        return (False, False, "")
     
     data_page_json = component_div["data-page"]
     decoded_data = html.unescape(data_page_json)

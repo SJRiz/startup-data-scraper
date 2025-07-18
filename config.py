@@ -6,7 +6,7 @@ load_dotenv()
 RETRY_DELAY = 2.5
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY")
 GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
-X_ALGOLIA_API_KEY = os.getenv("x-algolia-api-key")
+X_ALGOLIA_API_KEY = os.getenv("x_algolia_api_key")
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
