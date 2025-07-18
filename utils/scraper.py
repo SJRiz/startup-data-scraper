@@ -140,8 +140,9 @@ def fetch_yc_companies(existing_companies) -> Iterator[None]:
             email = get_ceo_email_from_hunter(extract_domain(website), ceo_name.split()[0], ceo_name.split()[-1]) if website else ""
 
             # Append everything
-            sheet.append_row([name, website, job_website, eng, remote, stage, company_linkedin, ceo_name, ceo_linkedin, email, desc])
-            existing_companies.add(name)
+            if not sheet.cell(index, 1).value:
+                sheet.append_row([name, website, job_website, eng, remote, stage, company_linkedin, ceo_name, ceo_linkedin, email, desc])
+                existing_companies.add(name)
             yield
 
         # If we have but email is missing, try using hunter again (if key works)

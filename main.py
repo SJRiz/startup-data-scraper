@@ -4,7 +4,6 @@ from utils.sheets import sheet
 from utils.scraper import fetch_yc_companies
 
 def main():
-
     # Add header row if empty
     if len(sheet.get_all_values()[0]) < 2:
         sheet.append_row([
