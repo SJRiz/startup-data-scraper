@@ -30,8 +30,11 @@ sheet = gs_client.open(GOOGLE_SHEET_NAME).sheet1
 if not sheet.get_all_values():
     sheet.append_row([
         "Startup Name", "Website", "Job URL", "Hiring Engineers?",
-        "Hiring Remote?", "Stage", "Linkedin URL", "CEO Name", "CEO Linkedin"
+        "Hiring Remote?", "Stage", "Linkedin URL", "CEO Name", "CEO Linkedin", "CEO Email", "Short Desc"
     ])
+
+# Load existing company names and emails to avoid duplicates
+existing_companies = set((row[0], row[-2]) for row in sheet.get_all_values()[1:] if row[0])
 
 # Removes the https:// portion of the website to get the domain
 def extract_domain(url: str) -> str:
@@ -154,7 +157,8 @@ def get_ceo_email_from_hunter(domain: str) -> str:
 
 # Fetches a company's name, website, stage, and description through a generator
 def fetch_yc_companies() -> Iterator[tuple[str]]:
-    
+    index = 0
+
     # YC uses algolia api to fetch companies, we can use it too
     url = "https://45bwzj1sgc-dsn.algolia.net/1/indexes/*/queries"
     headers = {
@@ -178,17 +182,33 @@ def fetch_yc_companies() -> Iterator[tuple[str]]:
 
     # a "hit" is a company dictionary for YC
     for hit in json_data["results"][0]["hits"]:
+        index += 1
         name = hit.get("name", "Unknown")
         website = hit.get("website", "Not Found")
-        stage = hit.get("stage", "Unknown")
-        desc = hit.get("one_liner", "")
-        slug = hit.get("slug", "")
-        link = f"https://www.ycombinator.com/companies/{slug}" if slug else ""
-        tuple1 = extract_founder_company_info(link)
-        tuple2 = search_jobs(link+"/jobs", website)
-        yield (name, website, stage, desc, tuple1, tuple2)
 
-for a in fetch_yc_companies():
-    print(a)
-    print("-"*100)
+        # If we havent done this company before then add it
+        if name not in existing_companies:
+            stage = hit.get("stage", "Unknown")
+            desc = hit.get("one_liner", "")
+            slug = hit.get("slug", "")
+            link = f"https://www.ycombinator.com/companies/{slug}" if slug else ""
+            ceo_name, ceo_linkedin, company_linkedin = extract_founder_company_info(link) if link else None
+            eng, remote, job_website = search_jobs(link+"/jobs", website) if link else None
+            email = get_ceo_email_from_hunter(extract_domain(website)) if website else ""
+            sheet.append_row([name, website, job_website, eng, remote, stage, company_linkedin, ceo_name, ceo_linkedin, desc])
+            existing_companies.add((name, email))
+            yield
+
+        # If we have but email is missing, try using hunter again (if key works)
+        elif existing_companies[name][1] == "":
+            email = get_ceo_email_from_hunter(extract_domain(website)) if website else ""
+            sheet.update_cell(index, 10, email)
+            yield
+        
+        # Otherwise continue next iteration
+        else:
+            yield
+
+for _ in fetch_yc_companies():
+    print("Appended a startup")
     time.sleep(0.5)
