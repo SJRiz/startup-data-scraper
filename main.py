@@ -118,33 +118,28 @@ def find_job_website(company_link: str) -> str:
         return company_link+"/jobs"
     return ""
 
-# Uses hunter api key to find the ceo's email
-def get_ceo_email_from_hunter(domain: str) -> str:
-    if not domain:
+# Uses Hunter Email Finder API to get CEO email by name + domain
+def get_ceo_email_from_hunter(domain: str, first_name: str, last_name: str) -> str:
+    if not domain or not first_name or not last_name:
         return ""
 
     try:
-        url = "https://api.hunter.io/v2/domain-search"
-        params = {"domain": domain, "api_key": HUNTER_API_KEY}
+        url = "https://api.hunter.io/v2/email-finder"
+        params = {
+            "domain": domain,
+            "first_name": first_name,
+            "last_name": last_name,
+            "api_key": HUNTER_API_KEY
+        }
         resp = requests.get(url, params=params, timeout=3)
         resp.raise_for_status()
-        emails = resp.json().get("data", {}).get("emails", [])
+        data = resp.json().get("data", {})
 
-        # Only look for CEO/founder-level roles
-        senior_titles = ["ceo", "founder", "president", "chief", "executive"]
-        for email_obj in sorted(emails, key=lambda x: x.get("confidence", 0), reverse=True):
-            position = email_obj.get("position_raw", "") or email_obj.get("position", "")
-            if any(role in position.lower() for role in senior_titles):
-                return email_obj.get("value", "")
-
-        # Fallback: just return most confident email
-        if emails:
-            return emails[0].get("value", "")
-
-    except Exception:
+        return data.get("email", "")
+    
+    except Exception as e:
+        print(f"Email finder error: {e}")
         return ""
-
-    return ""
 
 # Fetches a company's name, website, stage, and description through a generator
 def fetch_yc_companies(existing_companies) -> Iterator[tuple[str]]:
