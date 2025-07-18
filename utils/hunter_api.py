@@ -21,6 +21,5 @@ def get_ceo_email_from_hunter(domain: str, first_name: str, last_name: str) -> s
 
         return data.get("email", "Not Found")
     
-    except Exception as e:
-        print(f"Email finder error: {e}")
+    except Exception:
         return ""
