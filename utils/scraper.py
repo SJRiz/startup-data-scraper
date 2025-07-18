@@ -6,7 +6,7 @@ from typing import Iterator
 from bs4 import BeautifulSoup
 
 from config import RETRY_DELAY, USER_AGENT, X_ALGOLIA_API_KEY
-from .sheets import sheet
+from .sheets import safe_cell_read, sheet
 from .hunter_api import get_ceo_email_from_hunter
 from .helpers import extract_domain
 
@@ -46,7 +46,7 @@ def extract_founder_company_info(yc_company_link: str) -> tuple[str, str, str]:
 
     return ceo_name, ceo_linkedin, company_linkedin
 
-# Checks if there are any remote or engineering jobs, as well as a dedicated career page
+# Checks if there are any remote or engineering jobs
 def search_jobs(yc_job_link: str, company_link: str) -> tuple[bool, bool, str]:
     html_structure = get_html(yc_job_link)
     soup = BeautifulSoup(html_structure, "html.parser")
@@ -55,7 +55,7 @@ def search_jobs(yc_job_link: str, company_link: str) -> tuple[bool, bool, str]:
     component_div = soup.find("div", id=lambda x: x and x.startswith("WaasShowJobsPage-react-component"))
 
     if not component_div:
-        return (False, False, "")
+        return False, False, ""
     
     data_page_json = component_div["data-page"]
     decoded_data = html.unescape(data_page_json)
@@ -140,14 +140,14 @@ def fetch_yc_companies(existing_companies) -> Iterator[None]:
             email = get_ceo_email_from_hunter(extract_domain(website), ceo_name.split()[0], ceo_name.split()[-1]) if website else ""
 
             # Append everything
-            if not sheet.cell(index, 1).value:
+            if not safe_cell_read(sheet, index, 1):
                 sheet.append_row([name, website, job_website, eng, remote, stage, company_linkedin, ceo_name, ceo_linkedin, email, desc])
                 existing_companies.add(name)
             yield
 
         # If we have but email is missing, try using hunter again (if key works)
-        elif not sheet.cell(index, 10).value:
-            ceo_name = sheet.cell(index, 8).value
+        elif not safe_cell_read(sheet, index, 10):
+            ceo_name = safe_cell_read(sheet, index, 8)
             email = get_ceo_email_from_hunter(extract_domain(website), ceo_name.split()[0], ceo_name.split()[-1]) if website else ""
             sheet.update_cell(index, 10, email)
             yield
