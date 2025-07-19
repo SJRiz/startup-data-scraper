@@ -4,11 +4,14 @@ import json
 import time
 from typing import Iterator
 from bs4 import BeautifulSoup
+from pathlib import Path
 
 from config import RETRY_DELAY, USER_AGENT, X_ALGOLIA_API_KEY
 from .sheets import safe_cell_read, sheet
 from .hunter_api import get_ceo_email_from_hunter
 from .helpers import extract_domain
+
+index_path = Path(__file__).resolve().parent.parent / "data" / "index.txt"
 
 # Gets the HTML structure of a website. Default 2 attempts
 def get_html(link: str, attempts: int = 2) -> str:
@@ -120,38 +123,51 @@ def fetch_yc_companies(existing_companies) -> Iterator[None]:
     # a "hit" is a company dictionary for YC
     for hit in json_data["results"][0]["hits"]:
         index += 1
-        name = hit.get("name", "Unknown")
-        website = hit.get("website", "Not Found")
 
-        # If we havent done this company before then add it
-        if name not in existing_companies:
-            stage = hit.get("stage", "Unknown")
-            desc = hit.get("one_liner", "")
-            slug = hit.get("slug", "")
-            link = f"https://www.ycombinator.com/companies/{slug}" if slug else ""
+        # Retrieve previous written index
+        with open(index_path, "r+") as f:
+            curr_index = int(f.read())
+            if index <= curr_index:
+                continue
+            f.seek(0)
+            f.write(str(index))
+            f.truncate()
 
-            # Extract founder info
-            ceo_name, ceo_linkedin, company_linkedin = extract_founder_company_info(link) if link else None
+        try:
+            name = hit.get("name", "Unknown")
+            website = hit.get("website", "Not Found")
 
-            # Extract job info
-            eng, remote, job_website = search_jobs(link+"/jobs", website) if link else None
+            # If we havent done this company before then add it
+            if name not in existing_companies:
+                stage = hit.get("stage", "Unknown")
+                desc = hit.get("one_liner", "")
+                slug = hit.get("slug", "")
+                link = f"https://www.ycombinator.com/companies/{slug}" if slug else ""
 
-            # Find email
-            email = get_ceo_email_from_hunter(extract_domain(website), ceo_name.split()[0], ceo_name.split()[-1]) if website else ""
+                # Extract founder info
+                ceo_name, ceo_linkedin, company_linkedin = extract_founder_company_info(link) if link else None
 
-            # Append everything
-            if not safe_cell_read(sheet, index, 1):
-                sheet.append_row([name, website, job_website, eng, remote, stage, company_linkedin, ceo_name, ceo_linkedin, email, desc])
-                existing_companies.add(name)
-            yield
+                # Extract job info
+                eng, remote, job_website = search_jobs(link+"/jobs", website) if link else None
 
-        # If we have but email is missing, try using hunter again (if key works)
-        elif not safe_cell_read(sheet, index, 10):
-            ceo_name = safe_cell_read(sheet, index, 8)
-            email = get_ceo_email_from_hunter(extract_domain(website), ceo_name.split()[0], ceo_name.split()[-1]) if website else ""
-            sheet.update_cell(index, 10, email)
-            yield
-        
-        # Otherwise continue next iteration
-        else:
+                # Find email
+                email = get_ceo_email_from_hunter(extract_domain(website), ceo_name.split()[0], ceo_name.split()[-1]) if website else ""
+
+                # Append everything
+                if not safe_cell_read(sheet, index, 1):
+                    sheet.append_row([name, website, job_website, eng, remote, stage, company_linkedin, ceo_name, ceo_linkedin, email, desc])
+                    existing_companies.add(name)
+                yield
+
+            # If we have but email is missing, try using hunter again (if key works)
+            elif not safe_cell_read(sheet, index, 10):
+                ceo_name = safe_cell_read(sheet, index, 8)
+                email = get_ceo_email_from_hunter(extract_domain(website), ceo_name.split()[0], ceo_name.split()[-1]) if website else ""
+                sheet.update_cell(index, 10, email)
+                yield
+            
+            # Otherwise continue next iteration
+            else:
+                yield
+        except:
             yield
