@@ -11,7 +11,7 @@ from .sheets import safe_cell_read, sheet
 from .hunter_api import get_ceo_email_from_hunter
 from .helpers import extract_domain
 
-index_path = Path(__file__).resolve().parent.parent / "data" / "index.txt"
+data_path = Path(__file__).resolve().parent.parent / "data" / "storedcompanies.txt"
 
 # Gets the HTML structure of a website. Default 2 attempts
 def get_html(link: str, attempts: int = 2) -> str:
@@ -23,7 +23,7 @@ def get_html(link: str, attempts: int = 2) -> str:
         response.raise_for_status()
         time.sleep(RETRY_DELAY)
         return response.text
-    
+
     # Retry if failure
     except requests.RequestException:
         if attempts > 0:
@@ -59,7 +59,7 @@ def search_jobs(yc_job_link: str, company_link: str) -> tuple[bool, bool, str]:
 
     if not component_div:
         return False, False, ""
-    
+
     data_page_json = component_div["data-page"]
     decoded_data = html.unescape(data_page_json)
     data = json.loads(decoded_data)
@@ -78,7 +78,7 @@ def search_jobs(yc_job_link: str, company_link: str) -> tuple[bool, bool, str]:
             remote = True
         if "eng" in role.lower() or "engineer" in title.lower():
             eng = True
-    
+
     # See if we can find the company's official job website
     job_website = find_job_website(company_link)
     if job_website != "":
@@ -96,10 +96,7 @@ def find_job_website(company_link: str) -> str:
     return ""
 
 # Fetches all the company's data through a generator/iterator using lazy evaluation (saves a lot of space rather than calculating all at once)
-def fetch_yc_companies(existing_companies) -> Iterator[None]:
-    index = 1
-
-    # YC uses algolia api to fetch companies, we can use it too
+def fetch_yc_companies() -> Iterator[None]:
     url = "https://45bwzj1sgc-dsn.algolia.net/1/indexes/*/queries"
     headers = {
         "Content-Type": "application/json",
@@ -107,67 +104,83 @@ def fetch_yc_companies(existing_companies) -> Iterator[None]:
         "x-algolia-application-id": "45BWZJ1SGC",
         "x-algolia-api-key": X_ALGOLIA_API_KEY
     }
-    data = {
-        "requests": [
-            {
+
+    # First get all available batches
+    batch_payload = {
+        "requests": [{
             "indexName": "YCCompany_production",
-            "params": "facetFilters=%5B%5B%22batch%3AFall%202024%22%2C%22batch%3ASpring%202025%22%2C%22batch%3ASummer%202015%22%2C%22batch%3ASummer%202016%22%2C%22batch%3ASummer%202017%22%2C%22batch%3ASummer%202018%22%2C%22batch%3ASummer%202019%22%2C%22batch%3ASummer%202020%22%2C%22batch%3ASummer%202021%22%2C%22batch%3ASummer%202022%22%2C%22batch%3ASummer%202023%22%2C%22batch%3ASummer%202024%22%2C%22batch%3ASummer%202025%22%2C%22batch%3AWinter%202015%22%2C%22batch%3AWinter%202016%22%2C%22batch%3AWinter%202017%22%2C%22batch%3AWinter%202018%22%2C%22batch%3AWinter%202019%22%2C%22batch%3AWinter%202020%22%2C%22batch%3AWinter%202021%22%2C%22batch%3AWinter%202022%22%2C%22batch%3AWinter%202023%22%2C%22batch%3AWinter%202024%22%2C%22batch%3AWinter%202025%22%5D%2C%5B%22isHiring%3Atrue%22%5D%5D&facets=%5B%22app_answers%22%2C%22batch%22%2C%22industries%22%2C%22isHiring%22%2C%22regions%22%2C%22subindustry%22%5D&hitsPerPage=1000&maxValuesPerFacet=1000&page=0&query="
-            }
-        ]
+            "query": "",
+            "hitsPerPage": 0,
+            "facets": ["batch"],
+            "facetFilters": [["regions:America / Canada"]]
+        }]
     }
-
-    res = requests.post(url, json=data, headers=headers)
+    res = requests.post(url, json=batch_payload, headers=headers)
     res.raise_for_status()
-    json_data = res.json()
+    batches = list(res.json()["results"][0]["facets"]["batch"].keys())
 
-    # a "hit" is a company dictionary for YC
-    for hit in json_data["results"][0]["hits"]:
-        index += 1
+    # Process each batch separately
+    for batch in batches:
+        payload = {
+            "requests": [{
+                "indexName": "YCCompany_production",
+                "query": "",
+                "page": 0,
+                "hitsPerPage": 1000,
+                "facets": [],
+                "facetFilters": [
+                    ["regions:America / Canada"],
+                    [f"batch:{batch}"]
+                ]
+            }]
+        }
 
-        # Retrieve previous written index
-        with open(index_path, "r+") as f:
-            curr_index = int(f.read())
-            if index <= curr_index:
-                continue
-            f.seek(0)
-            f.write(str(index))
-            f.truncate()
+        res = requests.post(url, json=payload, headers=headers)
+        res.raise_for_status()
+        result = res.json()["results"][0]
+        hits = result["hits"]
 
-        try:
-            name = hit.get("name", "Unknown")
-            website = hit.get("website", "Not Found")
+        for hit in hits:
 
-            # If we havent done this company before then add it
-            if name not in existing_companies:
-                stage = hit.get("stage", "Unknown")
-                desc = hit.get("one_liner", "")
-                slug = hit.get("slug", "")
-                link = f"https://www.ycombinator.com/companies/{slug}" if slug else ""
+            # Retrieve previous companies
+            with open(data_path, "r", encoding="utf-8") as f:
+                existing_companies = set(line.strip() for line in f if line.strip())
 
-                # Extract founder info
-                ceo_name, ceo_linkedin, company_linkedin = extract_founder_company_info(link) if link else None
+            try:
+                name = hit.get("name", "Unknown")
+                website = hit.get("website", "Not Found")
 
-                # Extract job info
-                eng, remote, job_website = search_jobs(link+"/jobs", website) if link else None
+                if name not in existing_companies:
+                    stage = hit.get("stage", "Unknown")
+                    desc = hit.get("one_liner", "")
+                    slug = hit.get("slug", "")
+                    link = f"https://www.ycombinator.com/companies/{slug}" if slug else ""
 
-                # Find email
-                email = get_ceo_email_from_hunter(extract_domain(website), ceo_name.split()[0], ceo_name.split()[-1]) if website else ""
+                    # Founder info
+                    ceo_name, ceo_linkedin, company_linkedin = extract_founder_company_info(link) if link else (None, None, None)
 
-                # Append everything
-                if not safe_cell_read(sheet, index, 1):
-                    sheet.append_row([name, website, job_website, eng, remote, stage, company_linkedin, ceo_name, ceo_linkedin, email, desc])
-                    existing_companies.add(name)
+                    # Job info
+                    eng, remote, job_website = search_jobs(link + "/jobs", website) if link else (None, None, None)
+
+                    # Email
+                    email = get_ceo_email_from_hunter(
+                        extract_domain(website),
+                        ceo_name.split()[0],
+                        ceo_name.split()[-1]
+                    ) if website and ceo_name else ""
+
+                    # Write to sheet (double check)
+                    if name not in existing_companies:
+                        sheet.append_row([
+                            name, website, job_website, eng, remote, stage,
+                            company_linkedin, ceo_name, ceo_linkedin, email, desc
+                        ])
+                        with open(data_path, "a", encoding="utf-8") as f:
+                            f.write('\n' + name.strip())
+                    yield
+
+                else:
+                    yield
+
+            except:
                 yield
-
-            # If we have but email is missing, try using hunter again (if key works)
-            elif not safe_cell_read(sheet, index, 10):
-                ceo_name = safe_cell_read(sheet, index, 8)
-                email = get_ceo_email_from_hunter(extract_domain(website), ceo_name.split()[0], ceo_name.split()[-1]) if website else ""
-                sheet.update_cell(index, 10, email)
-                yield
-            
-            # Otherwise continue next iteration
-            else:
-                yield
-        except:
-            yield
